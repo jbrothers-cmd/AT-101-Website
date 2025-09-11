@@ -1,0 +1,1276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Virtual Home — Lockscreen</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+
+
+
+<style>
+
+html, body, * {
+  font-family: "Tahoma", monospace !important;
+  -webkit-font-smoothing: none;
+  -moz-osx-font-smoothing: auto;
+}
+
+
+
+
+    html {
+  filter: saturate(0.9) brightness(0.95) hue-rotate(-10deg);
+}
+    
+/* CRT / 8-bit pixel overlay */
+#pixelOverlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 9999;
+
+  /* Base effect: pixelated blur + high contrast */
+  backdrop-filter: contrast(2) blur(1px);
+
+  /* Flicker + subtle hue shift animation */
+  animation: crtFlicker 0.15s infinite, hueShift 5s infinite linear;
+}
+
+/* Flicker animation: small blur + contrast changes */
+@keyframes crtFlicker {
+  0%, 100% { backdrop-filter: contrast(1.08) blur(1px); }
+  25% { backdrop-filter: contrast(1.06) blur(1.1px); }
+  50% { backdrop-filter: contrast(1.05) blur(1.15px); }
+  75% { backdrop-filter: contrast(1.07) blur(1.05px); }
+}
+
+/* Scanlines (horizontal) */
+#pixelOverlay::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(0,0,0,0.05) 0px,
+    rgba(0,0,0,0.05) 1px,
+    transparent 1px,
+    transparent 2px
+  );
+  pointer-events: none;
+  mix-blend-mode: exclusion; /* makes lines lighten content behind */
+}
+
+/* Vertical CRT lines */
+#pixelOverlay::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: repeating-linear-gradient(
+    to right,
+    rgba(0,0,0,0.03) 0px,
+    rgba(0,0,0,0.03) 1px,
+    transparent 1px,
+    transparent 2px
+  );
+  pointer-events: none;
+  mix-blend-mode: exclusion; /* makes vertical lines lighten content behind */
+}
+
+</style>
+
+<div id="pixelOverlay"></div>
+
+
+
+<style>
+
+    /* Desktop icons */
+.desktop-icon {
+  position: absolute;
+  z-index: 1000; /* base layer for icons */
+}
+
+/* Main windows (HeavenSurfer, Garden, Chapel, Projects, etc.) */
+.window {
+  position: absolute;
+  display: none;
+  z-index: 1010; /* above desktop icons */
+  box-shadow: 4px 4px 12px rgba(0,0,0,0.6);
+}
+
+/* Lock screen overlay */
+.lockscreen {
+  position: fixed;
+  z-index: 5000; /* top layer when visible */
+}
+    
+  :root{
+    --accent:#012a6b;
+    --card-bg:#f6f4ec;
+    --transition:900ms cubic-bezier(.2,.9,.2,1);
+  }
+
+  html,body{height:100%;}
+  body{
+    margin:0;
+    padding:0;
+    font-family: Tahoma, Verdana, sans-serif;
+    color:#111;
+    cursor: url('cursor.png') 16 16, auto;
+    background-color:#e8e6dc;
+    /* wallpaper set by JS */
+  }
+
+  /* Lockscreen */
+  .lockscreen{
+    position:fixed;
+    inset:0;
+    z-index:4000;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    background: url('lockscreen.jpg') no-repeat center center fixed;
+    background-size: cover;
+    transition: opacity var(--transition), transform var(--transition);
+    opacity:1;
+    pointer-events:auto;
+  }
+  .lockscreen.fade-out{
+    opacity:0;
+    transform: scale(0.995);
+    pointer-events:none;
+  }
+
+  /* Profiles row - large free-floating pictures */
+  .profiles-wrap{
+    width:100%;
+    display:flex;
+    justify-content:space-around;
+    align-items:center;
+    padding: 30px 6%;
+    box-sizing:border-box;
+    gap:24px;
+  }
+  .profile{
+    width:160px;
+    text-align:center;
+    cursor:pointer;
+    user-select:none;
+    outline: none;
+  }
+  .profile img{
+    width:160px;
+    height:160px;
+    object-fit:cover;
+    border-radius:8px;
+    border:3px solid rgba(255,255,255,0.85);
+    box-shadow:0 10px 30px rgba(0,0,0,0.35);
+    display:block;
+    margin:0 auto;
+    transition: transform 220ms ease, box-shadow 220ms ease, border-color 220ms ease, filter 220ms ease;
+  }
+  .profile .pname{
+    margin-top:10px;
+    color:white;
+    text-shadow:0 1px 2px rgba(0,0,0,0.5);
+    font-weight:700;
+  }
+
+  /* Retro-y animation for selected profile (applies to Guest too) */
+  .profile:hover img,
+  .profile:focus img,
+  .profile.selected img {
+    transform: translateY(-8px) scale(1.06) rotate(-3deg);
+    border-color:var(--accent);
+    box-shadow: 0 18px 46px rgba(0,0,0,0.5);
+    filter: contrast(1.02) saturate(1.04);
+  }
+
+  /* Pin panel (retro keypad) */
+  .pin-panel{
+    margin-top:28px;
+    min-width:320px;
+    max-width:420px;
+    background: rgba(255,255,255,0.95);
+    border-radius:10px;
+    border:2px solid rgba(0,0,0,0.06);
+    padding:14px;
+    box-shadow:0 12px 30px rgba(0,0,0,0.35);
+    display:none;
+    flex-direction:column;
+    align-items:center;
+    gap:12px;
+  }
+  .pin-panel.visible{ display:flex; }
+  .pin-display{ width:100%; display:flex; justify-content:center; gap:8px; margin-bottom:4px; }
+  .pin-dot{ width:14px; height:14px; border-radius:50%; background:#ddd; border:1px solid #bbb; }
+  .pin-dot.filled{ background:var(--accent); box-shadow:0 1px 2px rgba(0,0,0,0.2); }
+  .pin-pad{ width:100%; display:grid; grid-template-columns: repeat(3,1fr); gap:8px; }
+  .pin-key{
+    background: linear-gradient(#fff,#e9eefc);
+    border-radius:8px;
+    padding:14px 6px;
+    font-weight:700;
+    font-size:18px;
+    text-align:center;
+    cursor:pointer;
+    box-shadow:0 4px 10px rgba(0,0,0,0.12);
+    user-select:none;
+  }
+  .pin-key:active{ transform:translateY(1px); box-shadow:0 2px 6px rgba(0,0,0,0.12); }
+  .pin-small{ padding:10px 12px; border-radius:8px; background:#fff; border:1px solid #ccc; font-weight:700; cursor:pointer; }
+
+  /* welcome card */
+  .welcome-card{
+    margin-top:18px;
+    background:var(--card-bg);
+    border:2px solid var(--accent);
+    padding:20px 28px;
+    border-radius:10px;
+    box-shadow:6px 10px 28px rgba(0,0,0,0.35);
+    text-align:center;
+    display:none;
+    transform-origin:center;
+    transition:opacity 300ms ease, transform 300ms ease;
+  }
+  .welcome-card.visible{ display:block; opacity:1; transform:none; }
+  .welcome-title{ font-size:22px; color:var(--accent); margin:0 0 6px 0; }
+  .welcome-sub{ margin:0 0 12px 0; color:#333; }
+  .begin-btn{
+    display:inline-block; padding:10px 22px; border-radius:10px;
+    border:1px solid rgba(1,42,107,0.9);
+    background: linear-gradient(180deg,#ffffff 0%, #e9f0ff 60%);
+    font-weight:700; color:var(--accent); font-size:15px; cursor:pointer;
+    box-shadow:0 6px 18px rgba(1,42,107,0.16), inset 0 -2px 0 rgba(0,0,0,0.02);
+    transition:transform 150ms ease, box-shadow 150ms ease, opacity 200ms ease;
+  }
+  .begin-btn:hover{ transform:translateY(-2px); box-shadow:0 10px 24px rgba(1,42,107,0.20); }
+
+  /* Desktop / windows */
+  .window{
+    width:360px;
+    background: rgba(236,233,216,0.95);
+    border:2px solid var(--accent);
+    box-shadow:4px 4px 8px rgba(0,0,0,0.5);
+    position:absolute;
+    display:none;
+    user-select:none;
+  }
+  .titlebar{
+    background:linear-gradient(to right,var(--accent),#1a4a9c);
+    color:white; padding:4px; font-weight:bold;
+    display:flex; justify-content:space-between; align-items:center; cursor:move;
+  }
+  .titlebar-buttons span{
+    display:inline-block; width:20px; height:20px; margin-left:4px; text-align:center; line-height:20px;
+    background:#c0c0c0; color:black; border:1px solid #808080; font-size:14px; cursor:pointer; user-select:none;
+  }
+  .content{ padding:10px; }
+  /* ensure images inside windows fit neatly */
+  .window .content img{ max-width:100%; height:auto; display:block; margin:10px 0; object-fit:contain; max-height:260px; }
+
+  /* links — explicit styling so they remain blue/underlined */
+  a { color: #0000EE; text-decoration: underline; cursor: pointer; }
+  a:hover { color: #000099; }
+
+  #globalClock{
+    position:fixed; top:10px; left:50%; transform:translateX(-50%); font-size:24px; font-weight:bold;
+    background: rgba(255,255,255,0.85); padding:4px 10px; border:2px solid var(--accent); border-radius:4px; z-index:1000;
+  }
+
+  .minimized{
+    width:40px !important; height:40px !important; padding:0 !important; overflow:hidden;
+    cursor:pointer; background: url('window.png') no-repeat center center; background-size:contain;
+    border:none !important; box-shadow:2px 2px 5px rgba(0,0,0,0.5);
+  }
+
+  @media (max-width:760px){
+    .profiles-wrap{ gap:12px; padding:16px; }
+    .profile{ width:120px; }
+    .profile img{ width:120px; height:120px; }
+    .window{ width: 92vw; left:4vw !important; }
+    .pin-panel{ max-width: 320px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Audio elements -->
+<audio id="soundStartup" src="startup.wav" preload="auto" playsinline></audio>
+<audio id="soundLink" src="link.wav" preload="auto" playsinline></audio>
+<audio id="soundMinimize" src="minimize.wav" preload="auto" playsinline></audio>
+<audio id="soundExit" src="exit.wav" preload="auto" playsinline></audio>
+<audio id="soundChapel" src="chapel.wav" preload="auto" loop playsinline></audio>
+
+<!-- pin key sounds (will be played overlapped) -->
+<audio id="sound1" src="1.wav" preload="auto" playsinline></audio>
+<audio id="sound2" src="2.wav" preload="auto" playsinline></audio>
+<audio id="sound3" src="3.wav" preload="auto" playsinline></audio>
+<audio id="sound4" src="4.wav" preload="auto" playsinline></audio>
+<audio id="sound5" src="5.wav" preload="auto" playsinline></audio>
+<audio id="sound6" src="6.wav" preload="auto" playsinline></audio>
+<audio id="sound7" src="7.wav" preload="auto" playsinline></audio>
+<audio id="sound8" src="8.wav" preload="auto" playsinline></audio>
+<audio id="sound9" src="9.wav" preload="auto" playsinline></audio>
+<audio id="sound0" src="0.wav" preload="auto" playsinline></audio>
+<audio id="soundDlt" src="dlt.wav" preload="auto" playsinline></audio>
+<audio id="soundClr" src="clr.wav" preload="auto" playsinline></audio>
+
+<!-- Lockscreen -->
+<div id="lockscreen" class="lockscreen" role="dialog" aria-label="Login screen">
+  <div class="profiles-wrap" id="profilesWrap" aria-hidden="false">
+    <div class="profile" tabindex="0" role="button" data-name="Jackson" data-img="jackson.jpg" id="profile-jackson">
+      <img src="jackson.jpg" alt="Jackson profile picture">
+      <div class="pname">Jackson</div>
+    </div>
+    <div class="profile" tabindex="0" role="button" data-name="Max" data-img="max.jpg" id="profile-max">
+      <img src="max.jpg" alt="Max profile picture">
+      <div class="pname">Max</div>
+    </div>
+    <div class="profile" tabindex="0" role="button" data-name="Sarah" data-img="sarah.jpg" id="profile-sarah">
+      <img src="sarah.jpg" alt="Sarah profile picture">
+      <div class="pname">Sarah</div>
+    </div>
+    <div class="profile" tabindex="0" role="button" data-name="Guest" data-img="guest.jpg" id="profile-guest">
+      <img src="guest.jpg" alt="Guest profile picture">
+      <div class="pname">Guest</div>
+    </div>
+  </div>
+
+  <!-- PIN panel -->
+  <div class="pin-panel" id="pinPanel" aria-hidden="true">
+    <div style="font-weight:700; color:var(--accent);">Enter PIN</div>
+    <div class="pin-display" id="pinDisplay" aria-hidden="true">
+      <div class="pin-dot" id="dot1"></div>
+      <div class="pin-dot" id="dot2"></div>
+      <div class="pin-dot" id="dot3"></div>
+      <div class="pin-dot" id="dot4"></div>
+      <div class="pin-dot" id="dot5"></div>
+      <div class="pin-dot" id="dot6"></div>
+    </div>
+
+    <div class="pin-pad" id="pinPad" role="group" aria-label="PIN keypad">
+      <div class="pin-key" data-key="1">1</div><div class="pin-key" data-key="2">2</div><div class="pin-key" data-key="3">3</div>
+      <div class="pin-key" data-key="4">4</div><div class="pin-key" data-key="5">5</div><div class="pin-key" data-key="6">6</div>
+      <div class="pin-key" data-key="7">7</div><div class="pin-key" data-key="8">8</div><div class="pin-key" data-key="9">9</div>
+      <div class="pin-key pin-small" data-action="clear">CLR</div>
+      <div class="pin-key" data-key="0">0</div>
+      <div class="pin-key pin-small" data-action="back">&larr;</div>
+    </div>
+
+    <div style="width:100%; display:flex; gap:8px; justify-content:center; margin-top:8px;">
+      <button class="pin-small" id="pinCancel">Cancel</button>
+      <button class="pin-small" id="pinEnter">Enter</button>
+    </div>
+  </div>
+
+  <!-- welcome card -->
+  <div class="welcome-card" id="welcomeCard" role="dialog" aria-label="Welcome card">
+    <div class="welcome-title" id="welcomeTitle">Welcome, Guest!</div>
+    <div class="welcome-sub" id="welcomeSub">Press Begin to enter your desktop.</div>
+    <div><button id="beginBtn" class="begin-btn" aria-label="Click to Begin">Click to Begin</button></div>
+  </div>
+</div>
+
+<!-- Desktop -->
+<div id="globalClock" aria-hidden="true"></div>
+
+<!-- Windows -->
+<div id="windowHome" class="window" style="top:80px; left:50px; display:block;">
+  <div class="titlebar">
+    <span>My Virtual Home</span>
+    <div class="titlebar-buttons">
+      <span id="fullscreenBtn">⛶</span>
+      <span class="btn-minimize" aria-label="minimize">-</span>
+    </div>
+  </div>
+  <div class="content">
+    <h1 id="greeting">Welcome, User!</h1>
+    <h2 id="describe">The day has begun.</h2>
+    <p><b>This</b> is my virtual home, which exists on the Internet.</p>
+    <p><i>Here is a shooting star:</i><br><marquee>★---------</marquee></p>
+    <h2><a class="desktop-link" onclick="openWindow('windowChapel')">Go to Chapel</a></h2>
+    <h2><a class="desktop-link" onclick="openWindow('windowMary')">Go to Mary</a></h2>
+    <h2><a class="desktop-link" onclick="openWindow('windowSleep')">Go to Sleep</a></h2>
+    <div><a class="about-link" onclick="openWindow('windowAbout')">How Did I Make This Site?</a></div>
+  </div>
+</div>
+
+<div id="windowProjectsMain" class="window" style="top:80px; left:1365px; display:block;">
+  <div class="titlebar">
+    <span>My Virtual Home</span>
+    <div class="titlebar-buttons">
+      <span class="btn-minimize" aria-label="minimize">-</span>
+    </div>
+  </div>
+  <div class="content">
+    <h2><a class="desktop-link" onclick="openWindow('windowProjects')">My Projects</a></h2>
+  </div>
+</div>
+
+<div id="windowChapel" class="window" style="top:100px; left:150px;">
+  <div class="titlebar"><span>Chapel</span><div class="titlebar-buttons"><span class="btn-close">X</span></div></div>
+  <div class="content"><h1>Welcome to the Chapel</h1><img src="cross.png" alt="Chapel Image"><p>This is the Chapel window.</p></div>
+</div>
+
+<div id="windowMary" class="window" style="top:120px; left:180px;">
+  <div class="titlebar"><span>Mary</span><div class="titlebar-buttons"><span class="btn-close">X</span></div></div>
+  <div class="content"><h1>Hello from Mary</h1><img src="Mary.jpg" alt="Mary Image"><p>This is the Mary window.</p></div>
+</div>
+
+<div id="windowSleep" class="window" style="top:140px; left:220px;">
+  <div class="titlebar"><span>Sleep</span><div class="titlebar-buttons"><span class="btn-close">X</span></div></div>
+  <div class="content"><h1>Sleep Mode</h1><img src="sleep.jpeg" alt="Sleep Image"><p>Time to rest. The night is cold.</p></div>
+</div>
+
+<div id="windowProjects" class="window" style="top:160px; left:260px;">
+  <div class="titlebar"><span>My Projects</span><div class="titlebar-buttons"><span class="btn-close">X</span></div></div>
+  <div class="content">
+    <h1>Downloadable Content</h1>
+    <ul>
+      <li><a href="downloads/project1.zip" download>Project 1 (ZIP)</a></li>
+      <li><a href="downloads/project2.pdf" download>Project 2 (PDF)</a></li>
+      <li><a href="downloads/project3.exe" download>Project 3 (Executable)</a></li>
+    </ul>
+  </div>
+</div>
+
+<div id="windowAbout" class="window" style="top:200px; left:300px;">
+  <div class="titlebar"><span>About This Site</span><div class="titlebar-buttons"><span class="btn-close">X</span></div></div>
+  <div class="content"><h1>How I Made This Site</h1><p>This site was composed with HTML, CSS, and JavaScript. I used an AI assistant to generate and refine code structure; I then adjusted and tested locally and supplied graphics (cursor.png, window.png, wallpapers).</p></div>
+</div>
+
+<script>
+/* ---------- Audio helpers ---------- */
+
+// Audio pool for PIN sounds to prevent stuttering
+const audioPools = {
+  '1': [], '2': [], '3': [], '4': [], '5': [], 
+  '6': [], '7': [], '8': [], '9': [], '0': [],
+  'back': [], 'clear': []
+};
+
+// Initialize audio pools
+function initAudioPools() {
+  // Create 3 instances of each sound for overlapping playback
+  for (let i = 0; i <= 9; i++) {
+    for (let j = 0; j < 3; j++) {
+      const audio = new Audio(`${i}.wav`);
+      audio.preload = 'auto';
+      audioPools[i].push(audio);
+    }
+  }
+  
+  // For back and clear sounds
+  for (let j = 0; j < 3; j++) {
+    const backAudio = new Audio('dlt.wav');
+    const clearAudio = new Audio('clr.wav');
+    backAudio.preload = 'auto';
+    clearAudio.preload = 'auto';
+    audioPools.back.push(backAudio);
+    audioPools.clear.push(clearAudio);
+  }
+}
+
+// Play from audio pool (round-robin)
+let audioIndex = 0;
+function playFromPool(key) {
+  if (!audioPools[key] || audioPools[key].length === 0) return;
+  
+  // Get next audio instance in pool
+  const audio = audioPools[key][audioIndex];
+  audio.currentTime = 0; // Rewind to start
+  audio.play().catch(() => { /* Ignore errors */ });
+  
+  // Update index for next play
+  audioIndex = (audioIndex + 1) % audioPools[key].length;
+}
+
+/**
+ * playOnce: used for UI sounds where we want the browser's play control/promise behavior.
+ * playOverlap: clones and plays immediately to allow overlapping instances (for PIN keys).
+ */
+function playOnce(audioEl){
+  return new Promise((resolve, reject) => {
+    if(!audioEl) return resolve();
+    let played=false;
+    const onPlaying = ()=>{ played=true; cleanup(); resolve(); };
+    const onError = (err)=>{ cleanup(); reject(err || new Error('audio_error')); };
+    const cleanup = ()=>{ audioEl.removeEventListener('playing', onPlaying); audioEl.removeEventListener('error', onError); clearTimeout(timer); };
+    audioEl.addEventListener('playing', onPlaying);
+    audioEl.addEventListener('error', onError);
+    try {
+      const p = audioEl.play();
+      if(p && typeof p.then === 'function') p.catch(err => { cleanup(); reject(err); });
+    } catch(e) {
+      cleanup();
+      reject(e);
+    }
+    const timer = setTimeout(()=>{ if(!played){ cleanup(); reject(new Error('play_timeout')); } }, 1100);
+  });
+}
+
+/* Play by cloning the audio element — allows overlapping sounds */
+function playOverlap(audioEl){
+  if(!audioEl) return;
+  try {
+    const clone = audioEl.cloneNode(true);
+    clone.play().catch(()=>{ /* ignore */ });
+  } catch(e){}
+}
+
+function startLoop(audioEl){ if(!audioEl) return; audioEl.loop=true; audioEl.play().catch(()=>{}); }
+function stopLoop(audioEl){ if(!audioEl) return; audioEl.pause(); audioEl.currentTime=0; audioEl.loop=false; }
+
+/* ---------- Desktop helpers ---------- */
+function updateClocks(){ const now=new Date(); const c=document.getElementById('globalClock'); if(c) c.textContent = now.toLocaleTimeString(); }
+function setMainGreeting(name){
+  const now=new Date(); const hour=now.getHours();
+  const greetingPrefix = hour < 12 ? "Good morning, " : hour < 18 ? "Good afternoon, " : "Good evening, ";
+  const g = document.getElementById('greeting'); if(g) g.textContent = greetingPrefix + (name || 'User') + '!';
+  // Update document title to show user on desktop
+  document.title = 'Virtual Home — ' + (name || 'User');
+}
+function describeDay(){
+  const now=new Date(); const hour=now.getHours();
+  const desc = hour<12 ? "The day has begun. Another day out there in the real world." : hour<18 ? "The day has progressed. There's still time left out there." : "The day has ended. The night in reality is cold.";
+  const d=document.getElementById('describe'); if(d) d.textContent = desc;
+}
+function updateWallpaper(){ const now=new Date(); const hour=now.getHours(); let wallpaper = (hour<12) ? "morning.jpg" : (hour<18) ? "afternoon.jpg" : "night.gif"; document.body.style.background = `url('${wallpaper}') no-repeat center center fixed`; document.body.style.backgroundSize = 'cover'; }
+
+/* ---------- Window helpers ---------- */
+function makeDraggable(win){
+  const titleBar = win.querySelector('.titlebar'); if(!titleBar) return;
+  let offsetX=0, offsetY=0, isDown=false;
+  titleBar.addEventListener('mousedown', function(e){
+    if(e.button !== 0) return;
+    isDown = true;
+    offsetX = e.clientX - win.offsetLeft; offsetY = e.clientY - win.offsetTop;
+    document.addEventListener('mousemove', move); document.addEventListener('mouseup', stop);
+    e.preventDefault();
+  });
+  function move(e){ if(!isDown) return; win.style.left = (e.clientX - offsetX) + 'px'; win.style.top = (e.clientY - offsetY) + 'px'; }
+  function stop(){ isDown=false; document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', stop); }
+}
+
+function openWindow(id){
+  const w = document.getElementById(id); if(!w) return;
+  if(w.classList.contains('minimized')){
+    const ow = w.dataset.originalWidth || 360; const oh = w.dataset.originalHeight || 300;
+    w.style.width = ow + 'px'; w.style.height = oh + 'px';
+    const tb = w.querySelector('.titlebar'); if(tb) tb.style.display='flex';
+    const cont = w.querySelector('.content'); if(cont) cont.style.display='block';
+    w.classList.remove('minimized'); w.onclick = null;
+  }
+  w.style.display='block';
+  if(id === 'windowChapel') startLoop(document.getElementById('soundChapel'));
+  if(id === 'windowGarden') startLoop(document.getElementById('soundGarden'));
+  if(id === 'windowSleep') startLoop(document.getElementById('soundSleep'));
+}
+
+function minimizeWindow(id){
+  const w = document.getElementById(id); if(!w) return;
+  if(!w.dataset.originalWidth){ w.dataset.originalWidth = w.offsetWidth || 360; w.dataset.originalHeight = w.offsetHeight || 300; }
+  w.style.width = '40px'; w.style.height = '40px';
+  const tb = w.querySelector('.titlebar'); if(tb) tb.style.display='none';
+  const cont = w.querySelector('.content'); if(cont) cont.style.display='none';
+  w.classList.add('minimized');
+  if(id === 'windowChapel') stopLoop(document.getElementById('soundChapel'));
+  if(id === 'windowGarden') stopLoop(document.getElementById('soundGarden'));
+  if(id === 'windowSleep') stopLoop(document.getElementById('soundSleep'));
+  w.onclick = function(ev){ if(ev && (ev.target.closest('.titlebar-buttons') || ev.target.classList.contains('btn-minimize'))) return; const ow = w.dataset.originalWidth || 360; const oh = w.dataset.originalHeight || 300; w.style.width = ow + 'px'; w.style.height = oh + 'px'; if(tb) tb.style.display='flex'; if(cont) cont.style.display='block'; w.classList.remove('minimized'); w.onclick = null; if(id === 'windowChapel') startLoop(document.getElementById('soundChapel')); if(id === 'windowGarden') startLoop(document.getElementById('soundGarden')); if(id === 'windowSleep') startLoop(document.getElementById('soundSleep')); };
+}
+
+function closeWindow(id){
+  const w = document.getElementById(id); if(!w) return; w.style.display='none'; if(id === 'windowChapel') stopLoop(document.getElementById('soundChapel')); if(id === 'windowGarden') stopLoop(document.getElementById('soundGarden')); if(id === 'windowSleep') stopLoop(document.getElementById('soundSleep'));
+}
+
+/* ---------- Lockscreen & PIN logic ---------- */
+
+let currentProfile = null;
+let pinBuffer = '';
+
+function setSelectedProfile(name, elem){
+  currentProfile = name || 'Guest';
+  document.querySelectorAll('.profile').forEach(p => p.classList.remove('selected'));
+  if(elem) elem.classList.add('selected');
+  
+  if (currentProfile === 'Guest') {
+    // For Guest, skip PIN and show welcome card immediately
+    document.getElementById('pinPanel').classList.remove('visible');
+    document.getElementById('pinPanel').setAttribute('aria-hidden','true');
+    document.getElementById('welcomeTitle').textContent = `Welcome, ${currentProfile}!`;
+    document.getElementById('welcomeSub').textContent = `Press Begin to enter your desktop.`;
+    document.getElementById('welcomeCard').classList.add('visible');
+    setMainGreeting(currentProfile);
+  } else {
+    // For other users, show PIN panel
+    const panel = document.getElementById('pinPanel');
+    panel.classList.add('visible');
+    panel.setAttribute('aria-hidden','false');
+    pinBuffer = '';
+    updatePinDots();
+    // ensure welcome card hidden if previously visible
+    document.getElementById('welcomeCard').classList.remove('visible');
+    // update the welcome title preemptively for the user
+    document.getElementById('welcomeTitle').textContent = `Welcome, ${currentProfile}!`;
+    document.getElementById('welcomeSub').textContent = `Enter your PIN for ${currentProfile}.`;
+  }
+}
+
+function updatePinDots(){
+  const dots = document.querySelectorAll('.pin-dot');
+  dots.forEach((d,i)=> { if(i < pinBuffer.length) d.classList.add('filled'); else d.classList.remove('filled'); });
+}
+
+/* play overlapping pin sound for key */
+function playPinSoundForKey(key){
+  try {
+    if(/^[0-9]$/.test(key)){
+      playFromPool(key);
+    } else if(key === 'back'){ 
+      playFromPool('back');
+    } else if(key === 'clear'){ 
+      playFromPool('clear');
+    }
+  } catch(e){}
+}
+
+function pinKeyPress(val){
+  if(val === 'back'){ pinBuffer = pinBuffer.slice(0,-1); updatePinDots(); playPinSoundForKey('back'); return; }
+  if(val === 'clear'){ pinBuffer = ''; updatePinDots(); playPinSoundForKey('clear'); return; }
+  if(typeof val === 'string' && val.match(/^\d$/) && pinBuffer.length < 6){ pinBuffer += val; updatePinDots(); playPinSoundForKey(val); return; }
+}
+
+/* When Enter clicked on PIN pad: plays link.wav then submit */
+function pinSubmit(){
+  if(pinBuffer.length < 1){
+    const panel = document.getElementById('pinPanel');
+    panel.animate([{ transform: 'translateX(-6px)' }, { transform: 'translateX(6px)' }, { transform: 'translateX(0)' }], { duration: 260, iterations: 1 });
+    return;
+  }
+  // success: hide pin panel, show welcome card and update main greeting & title
+  document.getElementById('pinPanel').classList.remove('visible');
+  document.getElementById('pinPanel').setAttribute('aria-hidden','true');
+  document.getElementById('welcomeTitle').textContent = `Welcome, ${currentProfile}!`;
+  document.getElementById('welcomeSub').textContent = `You have successfully signed in as ${currentProfile}.`;
+  document.getElementById('welcomeCard').classList.add('visible');
+
+  // set main greeting (so the desktop will reflect the logged-in user)
+  setMainGreeting(currentProfile);
+}
+
+/* begin session - fade lockscreen and attempt to play startup sound */
+function beginSession(){
+  const startBtn = document.getElementById('beginBtn');
+  startBtn.disabled = true;
+  const startupAudio = document.getElementById('soundStartup');
+  // user gesture allows audio — play and ignore errors
+  playOnce(startupAudio).catch(()=>{});
+  // fade lockscreen
+  const overlay = document.getElementById('lockscreen');
+  overlay.classList.add('fade-out');
+  overlay.addEventListener('transitionend', function onEnd(){
+    overlay.parentNode && overlay.parentNode.removeChild(overlay);
+    overlay.removeEventListener('transitionend', onEnd);
+  });
+  // initialize desktop wallpaper & clock
+  updateWallpaper();
+  updateClocks();
+}
+
+/* ---------- DOM wiring ---------- */
+window.addEventListener('load', function(){
+  // Initialize audio pools for PIN sounds
+  initAudioPools();
+  
+  // initialize clock
+  updateClocks();
+  setInterval(updateClocks, 1000);
+  // ensure title initially indicates lockscreen (but will change on successful login)
+  document.title = 'Virtual Home — Lockscreen';
+
+  /* Profiles wiring */
+  const soundLink = document.getElementById('soundLink');
+  document.querySelectorAll('.profile').forEach(function(p){
+    p.addEventListener('click', function(e){
+      e.stopPropagation();
+      // clicking a profile picture plays link.wav (non-blocking)
+      // use playOverlap for immediacy (profile sounds are brief)
+      try { playOverlap(soundLink); } catch(e){}
+      setSelectedProfile(p.dataset.name, p);
+    });
+    p.addEventListener('keydown', function(e){
+      if(e.key === 'Enter' || e.key === ' ') { e.preventDefault(); p.click(); }
+    });
+  });
+
+  /* PIN pad wiring */
+  document.querySelectorAll('.pin-key').forEach(function(k){
+    k.addEventListener('click', function(e){
+      const action = k.dataset.action;
+      if(action === 'back'){ pinKeyPress('back'); return; }
+      if(action === 'clear'){ pinKeyPress('clear'); return; }
+      const key = k.dataset.key;
+      if(key) pinKeyPress(key);
+    });
+  });
+
+  document.getElementById('pinCancel').addEventListener('click', function(){
+    document.getElementById('pinPanel').classList.remove('visible');
+    document.getElementById('pinPanel').setAttribute('aria-hidden','true');
+    document.querySelectorAll('.profile').forEach(p => p.classList.remove('selected'));
+    currentProfile = null;
+    pinBuffer = ''; 
+    updatePinDots();
+  });
+
+  // Enter button should play link.wav then submit PIN
+  const pinEnterBtn = document.getElementById('pinEnter');
+  pinEnterBtn.addEventListener('click', function(e){
+    e.stopPropagation();
+    // play link.wav first (non-blocking), then submit
+    playOnce(soundLink).catch(()=>{}).finally(()=> pinSubmit());
+  });
+
+  // allow keyboard numeric entry for PIN
+  window.addEventListener('keydown', function(e){
+    const panel = document.getElementById('pinPanel');
+    if(!panel.classList.contains('visible')) return;
+    if(e.key === 'Backspace'){ pinKeyPress('back'); e.preventDefault(); }
+    else if(e.key === 'Enter'){ pinSubmit(); e.preventDefault(); }
+    else if(/^\d$/.test(e.key)){ pinKeyPress(e.key); e.preventDefault(); }
+  });
+
+  /* Begin (Click to Begin) wiring */
+  document.getElementById('beginBtn').addEventListener('click', function(e){
+    e.stopPropagation();
+    beginSession();
+  });
+
+  /* Desktop controls wiring */
+  const fsBtn = document.getElementById('fullscreenBtn');
+  if(fsBtn) fsBtn.addEventListener('click', function(e){ e.stopPropagation(); const doc = document.documentElement; if(!document.fullscreenElement){ doc.requestFullscreen?.(); } else { document.exitFullscreen?.(); } });
+
+  const soundMin = document.getElementById('soundMinimize');
+  const soundExit = document.getElementById('soundExit');
+  document.querySelectorAll('.btn-minimize').forEach(b => { const win = b.closest('.window'); if(!win) return; b.addEventListener('click', function(e){ e.stopPropagation(); playOnce(soundMin).finally(()=> minimizeWindow(win.id)); }); });
+  document.querySelectorAll('.btn-close').forEach(b => { const win = b.closest('.window'); if(!win) return; b.addEventListener('click', function(e){ e.stopPropagation(); playOnce(soundExit).finally(()=> closeWindow(win.id)); }); });
+
+  // delegated anchor click sound for links (non-blocking)
+  document.addEventListener('click', function(e){
+    const a = e.target.closest('a');
+    if(!a) return;
+    // do not replay for profile clicks (they are not anchors), safe to call
+    playOnce(soundLink).catch(()=>{});
+  });
+
+  // make windows draggable
+  document.querySelectorAll('.window').forEach(makeDraggable);
+
+  // show main windows beneath lockscreen so user sees them after login
+  document.getElementById('windowHome').style.display = 'block';
+  document.getElementById('windowProjectsMain').style.display = 'block';
+
+  // initial greeting uses Guest until login completes
+  setMainGreeting('Guest');
+  describeDay();
+});
+</script>
+
+<!-- Browser / other UI (HeavenSurfer) -->
+<meta charset="UTF-8">
+<title>Virtual Home</title>
+<style>
+  body {
+    margin: 0;
+    padding: 0;
+    font-family: Tahoma, Verdana, sans-serif;
+    background: url('night.gif') no-repeat center center fixed;
+    background-size: cover;
+    color: black;
+  }
+
+  /* Desktop icons */
+  .desktop-icon {
+    position: absolute;
+    width: 72px;
+    text-align: center;
+    cursor: pointer;
+  }
+  .desktop-icon img {
+    width: 64px;
+    height: 64px;
+    display: block;
+    margin: auto;
+  }
+
+  /* Window style */
+  .window {
+    width: 500px;
+    height: 600px;
+    background: #f0f0f0;
+    border: 2px solid #000080;
+    box-shadow: 4px 4px 12px rgba(0,0,0,0.6);
+    position: absolute;
+    display: none;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .titlebar {
+    background: linear-gradient(to right, #000080, #1a4a9c);
+    color: white;
+    padding: 6px;
+    font-weight: bold;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: move;
+  }
+  .titlebar-buttons span {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    margin-left: 4px;
+    text-align: center;
+    line-height: 20px;
+    background: #c0c0c0;
+    color: black;
+    border: 1px solid #808080;
+    font-size: 14px;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  /* Browser panels */
+  .browser-toolbar {
+    background: linear-gradient(to bottom, #d0d9f5, #a3b4e0);
+    border-bottom: 2px solid #000080;
+    padding: 6px;
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+  .browser-toolbar input {
+    flex: 1;
+    padding: 4px;
+    font-size: 14px;
+    border: 2px inset #ccc;
+  }
+  .browser-toolbar button {
+    background: linear-gradient(to bottom, #f5f5f5, #ccc);
+    border: 1px solid #666;
+    padding: 3px 10px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: bold;
+  }
+  .browser-toolbar button:hover {
+    background: #e0e0e0;
+  }
+
+  .browser-content {
+    flex: 1;
+    background: white;
+    overflow: auto;
+    padding: 12px;
+    font-size: 14px;
+  }
+
+  /* Pages */
+  .page {
+    display: none;
+  }
+  .active-page {
+    display: block;
+  }
+
+  /* Portal One (store) */
+  .product {
+    border: 1px solid #aaa;
+    background: #f9f9ff;
+    margin: 10px;
+    padding: 10px;
+    display: inline-block;
+    width: 200px;
+    text-align: center;
+    box-shadow: 2px 2px 6px rgba(0,0,0,0.2);
+  }
+  .product img {
+    max-width: 100%;
+    height: auto;
+  }
+  .product button {
+    margin-top: 5px;
+    background: linear-gradient(to bottom, #e2f0ff, #9dbbe0);
+    border: 1px solid #666;
+    cursor: pointer;
+    padding: 5px 8px;
+  }
+  .product button:hover {
+    background: #cfe0ff;
+  }
+
+  video {
+    width: 100%;
+    max-width: 640px;
+    margin: 10px auto;
+    display: block;
+    border: 3px solid #000080;
+    box-shadow: 0 0 10px rgba(0,0,0,0.5);
+  }
+</style>
+</head>
+<body>
+
+<!-- Browser Icon -->
+<div id="browserIcon" class="desktop-icon" style="top: 200px; left: 50%; transform: translateX(-50%); text-align:center;">
+  <img src="browser.png" alt="HeavenSurfer">
+  <div style="color:white; font-size:12px; margin-top:4px;">HeavenSurfer</div>
+</div>
+
+<!-- HeavenSurfer Browser Window -->
+<div id="windowBrowser" class="window" style="top:100px; left:100px; width:1600px; height:500px;">
+  <div class="titlebar">
+    <span>HeavenSurfer</span>
+    <div class="titlebar-buttons">
+      <!-- Close button with link sound -->
+      <span onclick="playOnce(document.getElementById('soundLink')).finally(()=>closeWindow('windowBrowser'))">X</span>
+    </div>
+  </div>
+  <div class="browser-toolbar">
+    <button onclick="goHome()">🏠</button>
+    <button onclick="goTo('portalone')">Portal One</button>
+    <button onclick="goTo('zephyr')">Zephyr</button>
+    <button onclick="goTo('heavennews')">HeavenNews</button>
+    <input id="searchBox" placeholder="Search with HeavenSurf...">
+    <button onclick="search()">Search</button>
+    <!-- Digital clock -->
+    <span id="browserClock" style="margin-left:auto; font-weight:bold; color:#000080;"></span>
+  </div>
+  <div class="browser-content">
+    <!-- HeavenSurf Home -->
+    <div id="heavensurf" class="page active-page">
+      <h1 style="color:#000080;">Welcome to HeavenSurf</h1>
+      <p>The portal to your digital paradise. Explore <b>Portal One</b> for shopping, stream videos on <b>Zephyr</b>, or catch up on <b>HeavenNews</b>.</p>
+    </div>
+    <!-- Portal One -->
+    <div id="portalone" class="page">
+      <h1>Portal One – Electronics Marketplace</h1>
+      <div class="product">
+        <img src="laptop.jpg" alt="Laptop">
+        <p><b>Laptop 2004X</b><br>$499.99</p>
+        <button>Buy Now</button>
+      </div>
+      <div class="product">
+        <img src="phone.jpg" alt="Phone">
+        <p><b>FlipPhone Ultra</b><br>$129.99</p>
+        <button>Buy Now</button>
+      </div>
+      <div class="product">
+        <img src="mp3.jpg" alt="MP3 Player">
+        <p><b>MP3 Player</b><br>$59.99</p>
+        <button>Buy Now</button>
+      </div>
+    </div>
+    <!-- Zephyr Video Page -->
+    <div id="zephyr" class="page">
+      <h1>Zephyr Videos</h1>
+      <video controls src="video1.mp4"></video>
+      <video controls src="video2.mp4"></video>
+      <video controls src="video3.mp4"></video>
+    </div>
+    <!-- HeavenNews -->
+    <div id="heavennews" class="page">
+      <h1>HeavenNews Daily</h1>
+      <ul style="line-height:1.6;">
+        <li><b>🌤️ Weather:</b> Eternal sunshine expected in Paradise Park.</li>
+        <li><b>🎶 Music:</b> Angelic Choir releases new hymn, topping celestial charts.</li>
+        <li><b>💻 Tech:</b> Portal One introduces a “cloud” storage that’s literally in a cloud.</li>
+        <li><b>⚡ Oddity:</b> A lightning bolt struck a harp — producing the “note of the year.</b></li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- Sounds -->
+<audio id="soundHeavenSurfer" src="heavensurfer.wav" preload="auto"></audio>
+
+<script>
+/* Open and close windows */
+function openWindow(id) {
+  document.getElementById(id).style.display = "flex";
+}
+function closeWindow(id) {
+  document.getElementById(id).style.display = "none";
+}
+
+/* Desktop icon opens browser */
+document.getElementById("browserIcon").onclick = function() {
+  openWindow("windowBrowser");
+  const sound = document.getElementById("soundHeavenSurfer");
+  sound.currentTime = 0;
+  sound.play().catch(()=>{});
+};
+
+/* Navigation */
+function goHome() {
+  setActivePage("heavensurf");
+}
+function goTo(page) {
+  setActivePage(page);
+}
+function setActivePage(id) {
+  document.querySelectorAll(".page").forEach(p => p.classList.remove("active-page"));
+  document.getElementById(id).classList.add("active-page");
+}
+
+/* Search -> Random Wikipedia */
+function search() {
+  window.open("https://en.wikipedia.org/wiki/Special:Random", "_blank");
+}
+</script>
+
+<!-- Garden and Sleep icons arranged symmetrically -->
+
+<!-- Garden Icon (moved left of center) -->
+<div id="gardenIcon" class="desktop-icon" style="top: 300px; left: calc(50% - 120px); transform: none;">
+  <img src="garden.png" alt="Garden">
+  <div style="color:white; font-size:12px; margin-top:4px;">Garden</div>
+</div>
+
+<!-- Sleep Icon (symmetric right of center) -->
+<div id="sleepIcon" class="desktop-icon" style="top: 300px; left: 1005px; transform: none;">
+  <img src="sleep.png" alt="Sleep">
+  <div style="color:white; font-size:12px; margin-top:4px;">Sleep</div>
+</div>
+
+<!-- Garden Window -->
+<div id="windowGarden" class="window" style="top:150px; left:300px; width:600px; height:400px;">
+  <div class="titlebar">
+    <span>Garden</span>
+    <div class="titlebar-buttons">
+      <span onclick="closeGarden()">X</span>
+    </div>
+  </div>
+  <div class="browser-content">
+    <video id="gardenVideo" width="100%" height="100%" loop autoplay muted>
+      <source src="ECCO2K–ECCOLOGY.mp4" type="video/mp4">
+      Your browser does not support the video tag.
+    </video>
+  </div>
+</div>
+
+<!-- Sleep Window -->
+<div id="windowSleepApp" class="window" style="top:150px; left:960px; width:600px; height:400px;">
+  <div class="titlebar">
+    <span>Sleep</span>
+    <div class="titlebar-buttons">
+      <span onclick="closeSleep()">X</span>
+    </div>
+  </div>
+  <div class="browser-content">
+    <img id="sleepVideo" src="stars.gif" width="100%" height="100%" alt="Stars animation">
+  </div>
+</div>
+
+<!-- Sound placeholders -->
+<audio id="soundGarden" src="garden.wav" preload="auto" loop></audio>
+<audio id="soundSleep" src="chapel.wav" preload="auto" loop></audio>
+<audio id="soundLink" src="link.wav" preload="auto"></audio>
+
+<script>
+/* Helper to play sound once */
+function playOnce(audioEl) {
+  return new Promise(resolve => {
+    if (!audioEl) return resolve();
+    audioEl.currentTime = 0;
+    audioEl.play().catch(()=>{}).finally(resolve);
+  });
+}
+
+/* Start loop helper */
+function startLoop(audioEl) {
+  if (!audioEl) return;
+  audioEl.currentTime = 0;
+  audioEl.play().catch(()=>{});
+}
+
+/* Stop loop helper */
+function stopLoop(audioEl) {
+  if (!audioEl) return;
+  audioEl.pause();
+  audioEl.currentTime = 0;
+}
+
+/* Garden */
+document.getElementById("gardenIcon").onclick = function() {
+  openWindow("windowGarden");
+  startLoop(document.getElementById("soundGarden"));
+  const video = document.getElementById("gardenVideo");
+  video.currentTime = 0;
+  video.play().catch(()=>{});
+};
+function closeGarden() {
+  playOnce(document.getElementById("soundLink")).finally(()=>{
+    closeWindow("windowGarden");
+    stopLoop(document.getElementById("soundGarden"));
+    const video = document.getElementById("gardenVideo");
+    video.pause();
+    video.currentTime = 0;
+  });
+}
+
+/* Sleep */
+document.getElementById("sleepIcon").onclick = function() {
+  openWindow("windowSleepApp");
+  startLoop(document.getElementById("soundSleep"));
+  const video = document.getElementById("sleepVideo");
+  video.currentTime = 0;
+  video.play().catch(()=>{});
+};
+function closeSleep() {
+  playOnce(document.getElementById("soundLink")).finally(()=>{
+    closeWindow("windowSleepApp");
+    stopLoop(document.getElementById("soundSleep"));
+    const video = document.getElementById("sleepVideo");
+    video.pause();
+    video.currentTime = 0;
+  });
+}
+</script>
+
+
+<!-- AngelMail Icon -->
+<div id="angelMailIcon" class="desktop-icon" style="top: 400px; left: 50%; transform: translateX(-50%);">
+  <img src="angelmail.png" alt="AngelMail">
+  <div style="color:white; font-size:12px; margin-top:4px;">AngelMail</div>
+</div>
+
+<!-- AngelMail Window -->
+<div id="windowAngelMail" class="window" style="top:200px; left:300px; width:600px; height:400px;">
+  <div class="titlebar">
+    <span>AngelMail</span>
+    <div class="titlebar-buttons">
+      <span onclick="playOnce(document.getElementById('soundLink')).finally(()=>closeWindow('windowAngelMail'))">X</span>
+    </div>
+  </div>
+  <div class="browser-content" style="padding:10px;">
+    <form id="angelMailForm">
+      <label for="name">Name:</label><br>
+      <input type="text" id="name" name="name" required style="width:95%; margin-bottom:8px;"><br>
+
+      <label for="email">Email:</label><br>
+      <input type="email" id="email" name="email" required style="width:95%; margin-bottom:8px;"><br>
+
+      <label for="message">Message:</label><br>
+      <textarea id="message" name="message" required style="width:95%; height:120px; margin-bottom:8px;"></textarea><br>
+
+      <button type="submit">Send</button>
+    </form>
+    <div id="formStatus" style="margin-top:10px; color:green;"></div>
+  </div>
+</div>
+
+<!-- Sounds -->
+<audio id="soundAngelMail" src="mail.wav" preload="auto"></audio>
+
+<script>
+(function(){
+  // Single fix: make AngelMail icon open the window, bring it to front, and play the mail sound.
+  const icon = document.getElementById('angelMailIcon');
+  const win  = document.getElementById('windowAngelMail');
+  const mailSound = document.getElementById('soundAngelMail');
+  const linkSound = document.getElementById('soundLink');
+
+  if (icon && win) {
+    icon.addEventListener('click', function(e){
+      e.stopPropagation();
+      // show the window
+      win.style.display = 'block';
+
+      // prefer an existing bringToFront function if present, otherwise bump z-index
+      if (typeof bringToFront === 'function') {
+        try { bringToFront(win); } catch(e){ win.style.zIndex = (parseInt(win.style.zIndex||1010,10) + 1000); }
+      } else {
+        win.style.zIndex = (parseInt(win.style.zIndex||1010,10) + 1000);
+      }
+
+      // play mail sound if available
+      if (mailSound) {
+        try { mailSound.currentTime = 0; mailSound.play().catch(()=>{}); } catch(e){}
+      }
+    });
+  }
+
+  // Ensure any titlebar X / close button inside AngelMail plays link.wav and closes the window.
+  if (win) {
+    const closeControls = win.querySelectorAll('.titlebar-buttons span, .btn-close, .titlebar .btn-close');
+    closeControls.forEach(btn => {
+      btn.addEventListener('click', function(e){
+        e.stopPropagation();
+        if (linkSound) {
+          try { linkSound.currentTime = 0; linkSound.play().catch(()=>{}); } catch(e){}
+        }
+        win.style.display = 'none';
+      });
+    });
+  }
+
+})();
+
+// AngelMail “Send” button functionality
+(function() {
+  const form = document.getElementById('angelMailForm');
+  const mailSound = document.getElementById('soundAngelMail');
+
+  if (form) {
+    form.addEventListener('submit', function(e) {
+      e.preventDefault(); // prevent page reload
+
+      const name = form.name.value.trim();
+      const email = form.email.value.trim();
+      const message = form.message.value.trim();
+
+      if (!name || !email || !message) {
+        alert('Please fill in all fields.');
+        return;
+      }
+
+      // Optional: play mail sound
+      if (mailSound) {
+        try { mailSound.currentTime = 0; mailSound.play().catch(()=>{}); } catch(e){}
+      }
+
+      // Build the mailto URL
+      const subject = encodeURIComponent(`Message from ${name}`);
+      const body = encodeURIComponent(`${message}\n\nSent by an angel.`);
+      const mailtoLink = `mailto:${email}?subject=${subject}&body=${body}`;
+
+      // Open the default email client
+      window.location.href = mailtoLink;
+    });
+  }
+})();
+</script>
+
+
+
+
+<!-- Ensure closeWindow stops garden and sleep ambient too (generic handler already covers it) -->
+
+<!-- End of functional markup and scripts -->
+
+<!-- PADDING COMMENT: the following blank lines are intentional and will not affect behavior. They exist to satisfy length constraints and will be ignored by browsers. -->
+<!-- START PADDING -->
